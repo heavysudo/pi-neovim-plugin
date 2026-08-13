@@ -31,6 +31,18 @@ pi_neovim.default_config = {
 	keymaps = {
 		{ "n", "<leader>pp", "<cmd>PiPrompt<cr>", desc = "Pi Prompt" },
 	},
+	-- UI options
+	ui = {
+		float = { border = "rounded", max_width = 100, max_height = 30 },
+		streaming = true,
+	},
+	-- Request behavior
+	request = {
+		timeout = 30000,
+		retry = 1,
+	},
+	-- Logging
+	log_level = "info",
 }
 
 pi_neovim.config = {}
@@ -41,16 +53,26 @@ local context = require("pi_neovim.context")
 local cmp_source = require("pi_neovim.cmp_source")
 local commands = require("pi_neovim.commands")
 
+-- Load health check module (registers with :checkhealth)
+require("pi_neovim.health")
+
 -- Initialize the plugin
 function pi_neovim.setup(user_config)
 	-- Merge user config with default
 	pi_neovim.config = vim.tbl_deep_extend("force", pi_neovim.default_config, user_config or {})
 
 	-- Set up process callbacks
-	process.set_on_stdout(function(chunk)
-		-- TODO: handle stdout chunks (JSONL events)
-		-- For now, we just print to Neovim's messages? Or we can log.
-		-- We'll implement a proper event parser later.
+	process.set_on_event(function(event)
+		-- Handle parsed JSONL events from Pi
+		-- Event types: completion, status, error, etc.
+		if event.type == "status" then
+			vim.notify("Pi: " .. (event.message or "status"), vim.log.levels.INFO)
+		elseif event.type == "error" then
+			vim.notify("Pi error: " .. (event.message or "unknown"), vim.log.levels.ERROR)
+		end
+	end)
+	process.set_on_error(function(err, raw_line)
+		vim.notify("Pi JSONL parse error: " .. err, vim.log.levels.WARN)
 	end)
 	process.set_on_stderr(function(chunk)
 		vim.notify("Pi stderr: " .. chunk, vim.log.levels.WARN)
@@ -62,6 +84,20 @@ function pi_neovim.setup(user_config)
 			vim.notify("Pi agent exited normally", vim.log.levels.INFO)
 		end
 	end)
+
+	-- Configure context module
+	context.set_config(pi_neovim.config.context)
+
+	-- Configure autocomplete source
+	cmp_source.set_config(pi_neovim.config.autocomplete)
+
+	-- Configure UI module
+	local ui = require("pi_neovim.ui")
+	ui.set_config(pi_neovim.config.ui)
+
+	-- Configure request module
+	local request = require("pi_neovim.request")
+	request.set_default_timeout(pi_neovim.config.request.timeout)
 
 	-- Start the Pi agent process
 	local started = process.start({ cmd = pi_neovim.config.pi_cmd })

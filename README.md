@@ -4,26 +4,21 @@ This plugin integrates the [Pi coding agent](https://pi.dev) into Neovim to prov
 
 ## Features
 
-- **Context-aware Autocomplete**: Uses Pi to provide code completions based on your current buffer, open buffers, and working directory.
-- **Prompting**: Send arbitrary prompts to Pi from Neovim and see the results in a popup or split.
-- **Process Management**: Automatically starts and stops the Pi agent process.
+- **Context-aware Autocomplete**: Uses Pi to provide code completions based on your current buffer, cursor position, and workspace.
+- **Prompting**: Send arbitrary prompts to Pi from Neovim and see the results in a floating window with markdown rendering.
+- **Visual Selection Support**: Use `:PiPrompt!` with visual selection to include selected text in your prompt.
+- **Context Inspection**: View exactly what context is sent to Pi with `:PiContext`.
+- **Process Management**: Automatically starts/stops the Pi agent process with `:PiStart`, `:PiStop`, `:PiRestart`.
+- **Status Monitoring**: Check agent status with `:PiStatus`.
+- **Health Check**: Run `:checkhealth pi_neovim` to verify installation and configuration.
 - **LazyVim Integration**: Works seamlessly with LazyVim.
+- **JSONL Protocol**: Robust JSONL parsing for reliable communication with Pi.
 
 ## Installation
 
-### Manual Installation (Neovim's built-in package system)
-
-1. Clone the plugin into your Neovim package directory:
-
-   ```bash
-   git clone https://github.com/heavysudo/pi-neovim-plugin.git
-   ```
-
-2. The plugin will be automatically loaded on the next Neovim start.
-
 ### Using [lazy.nvim](https://github.com/folke/lazy.nvim) (recommended for LazyVim users)
 
-Add the following to your LazyVim configuration (e.g., in `lua/custom/plugins.lua`):
+Add the following to your LazyVim configuration (e.g., in `lua/plugins/pi-neovim.lua`):
 
 ```lua
 {
@@ -86,8 +81,23 @@ The plugin can be configured by passing a table to `setup()`. The default config
 
   -- Keybindings (optional)
   keymaps = {
-    -- Example: { "n", "<leader>pp", "<cmd>PiPrompt<cr>", desc = "Pi Prompt" },
+    { "n", "<leader>pp", "<cmd>PiPrompt<cr>", desc = "Pi Prompt" },
   },
+
+  -- UI options
+  ui = {
+    float = { border = "rounded", max_width = 100, max_height = 30 },
+    streaming = true,
+  },
+
+  -- Request behavior
+  request = {
+    timeout = 30000,
+    retry = 1,
+  },
+
+  -- Logging
+  log_level = "info",
 }
 ```
 
@@ -100,6 +110,33 @@ To use a specific model with Pi:
 ```lua
 require("pi_neovim").setup({
   pi_cmd = { "pi", "--mode", "rpc", "--no-session", "--model", "claude-3-opus-20240229" },
+})
+```
+
+### Example: Autocomplete for Specific Filetypes Only
+
+```lua
+require("pi_neovim").setup({
+  autocomplete = {
+    enabled = true,
+    filetypes = { "lua", "python", "javascript", "typescript", "go", "rust" },
+    trigger_length = 3,
+  },
+})
+```
+
+### Example: Custom UI Settings
+
+```lua
+require("pi_neovim").setup({
+  ui = {
+    float = { border = "single", max_width = 120, max_height = 40 },
+    streaming = true,
+  },
+  request = {
+    timeout = 60000,
+    retry = 2,
+  },
 })
 ```
 
@@ -155,33 +192,61 @@ You may also want to set up keymaps for starting, stopping, and checking the Pi 
 { "n", "<leader>pS", "<cmd>PiStatus<cr>", desc = "Pi agent status" },
 ```
 
-## Usage
+## Commands
 
-### Autocomplete
+| Command | Description |
+| --------- | ------------- |
+| `:PiPrompt [prompt]` | Send prompt to Pi, show response in floating window |
+| `:PiPrompt!` | Same but includes visual selection as context |
+| `:PiStart` | Start Pi agent process |
+| `:PiStop` | Stop Pi agent process |
+| `:PiRestart` | Restart Pi agent process |
+| `:PiStatus` | Show agent status (running/stopped, job ID, pending requests) |
+| `:PiContext` | Show current context that would be sent to Pi |
+| `:checkhealth pi_neovim` | Run health check for the plugin |
+
+### Usage Examples
+
+```vim
+" Send a prompt with context
+:PiPrompt Explain this function
+
+" Send prompt with visual selection (select text first, then run)
+:PiPrompt! What does this code do?
+
+" Check agent status
+:PiStatus
+
+" View context being sent
+:PiContext
+
+" Restart agent if it's stuck
+:PiRestart
+
+" Run health check
+:checkhealth pi_neovim
+```
+
+## Autocomplete
 
 Once the plugin is set up and nvim-cmp is installed, autocomplete will work automatically in supported filetypes. The plugin registers a source named "pi" with nvim-cmp.
 
-### Prompting
+The autocomplete source:
 
-Use the `:PiPrompt` command to send a prompt to Pi.
-
-- `:PiPrompt Explain this function` - sends a prompt and shows the result in a floating window.
-- In visual mode, select text and run `:PiPrompt` to ask about the selected text.
-
-### Process Management
-
-- `:PiStart` - manually start the Pi agent process (usually started automatically).
-- `:PiStop` - stop the Pi agent process.
-- `:PiRestart` - restart the Pi agent process.
-- `:PiStatus` - show the status of the Pi agent.
+- Respects `autocomplete.filetypes` (empty = all filetypes)
+- Respects `autocomplete.trigger_length` (minimum prefix length)
+- Sends buffer context, cursor position, and trigger character to Pi
+- Returns completions formatted for nvim-cmp (with kind, detail, documentation)
 
 ## How It Works
 
-The plugin spawns a Pi agent process in RPC mode (`pi --mode rpc --no-session`). It communicates with the agent via JSONL over stdin/stdout.
+The plugin spawns a Pi agent process in RPC mode (`pi --mode rpc --no-session`). It communicates with the agent via JSONL (JSON Lines) over stdin/stdout.
 
-For each autocomplete request, the plugin gathers context from Neovim (current buffer, cursor position, open buffers, working directory) and sends a prompt to Pi asking for a code completion.
+For each autocomplete request, the plugin gathers context from Neovim (current buffer, cursor position, workspace info) and sends a completion request to Pi.
 
-For general prompting, the plugin sends the user's prompt along with the same context.
+For general prompting, the plugin sends the user's prompt along with the same context, plus recent buffers and visual selection if applicable.
+
+Responses are displayed in floating windows with markdown syntax highlighting.
 
 ## Requirements
 
@@ -189,9 +254,63 @@ For general prompting, the plugin sends the user's prompt along with the same co
 - [Pi coding agent](https://pi.dev) installed and available in your PATH
 - [nvim-cmp](https://github.com/hrsh7th/nvim-cmp) (optional, for autocomplete)
 
+## Health Check
+
+Run `:checkhealth pi_neovim` to verify:
+
+- Neovim version compatibility
+- Pi binary installation and version
+- nvim-cmp integration
+- Plugin configuration
+- Pi RPC mode enabled
+- Agent process status
+
+## Troubleshooting
+
+### Pi agent fails to start
+
+1. Ensure `pi` is in your PATH: run `:PiStart` and check for errors
+2. Verify Pi RPC mode works: `pi --mode rpc --no-session` in terminal
+3. Check `:PiStatus` for process status
+4. Run `:checkhealth pi_neovim` for diagnostics
+
+### Autocomplete not working
+
+1. Ensure nvim-cmp is installed and configured
+2. Check `:PiStatus` - agent must be running
+3. Verify filetype is in `autocomplete.filetypes` (or empty for all)
+4. Type at least `trigger_length` characters before completion triggers
+
+### Commands not found
+
+1. Ensure plugin is loaded: `:lua require("pi_neovim").setup({})`
+2. Check for errors in `:messages`
+3. Run `:checkhealth pi_neovim`
+
+### Floating window issues
+
+1. Ensure Neovim has floating window support (0.5.0+)
+2. Check `ui.float` config for valid border/width/height values
+
 ## Development
 
 This plugin was created as a demonstration of integrating Pi with Neovim. Feel free to extend it!
+
+### Architecture
+
+```
+lua/pi_neovim/
+├── init.lua          # Main entry point, config, setup
+├── process.lua       # Process management, JSONL I/O
+├── jsonl.lua         # JSONL parser for Pi RPC protocol
+├── request.lua       # Request/response correlation, timeouts
+├── context.lua       # Context gathering (buffer, workspace, selection)
+├── cmp_source.lua    # nvim-cmp autocomplete source
+├── commands.lua      # User commands (:PiPrompt, :PiStart, etc.)
+├── ui.lua            # Floating window UI utilities
+├── response.lua      # Streaming response handler
+��── health.lua        # :checkhealth integration
+```
 
 ## License
 
